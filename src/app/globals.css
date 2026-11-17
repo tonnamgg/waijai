@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #ecece7;
+  color: #141414;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-feature-settings: "tnum" 0;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+@layer components {
+  .input {
+    @apply h-[46px] w-full rounded-btn border border-field bg-surface px-4 text-[16px] text-ink outline-none transition-all duration-200 placeholder:text-[#8A8A84] focus:border-accent focus:ring-4 focus:ring-accent/10;
+  }
+  .textarea {
+    @apply w-full rounded-btn border border-field bg-surface px-4 py-3 text-[16px] leading-relaxed text-ink outline-none transition-all duration-200 placeholder:text-[#8A8A84] focus:border-accent focus:ring-4 focus:ring-accent/10;
+  }
+  .label {
+    @apply mb-2 block text-[15px] font-semibold text-ink;
+  }
+  .card {
+    @apply rounded-card border border-line bg-surface;
+  }
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

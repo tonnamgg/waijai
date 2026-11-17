@@ -1,0 +1,130 @@
+// SQLite ตอน dev — สถานะ/ชนิดเก็บเป็น String แล้วตรวจด้วย TypeScript (src/lib/types.ts)
+// เปลี่ยนเป็น PostgreSQL ได้โดยแก้ provider และเปลี่ยนเป็น enum / String[]
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  username    String   @unique
+  displayName String
+  phone       String?  @unique
+  email       String?  @unique
+  role        String   @default("user") // user | admin
+  kycVerified Boolean  @default(false)
+  payoutBank  String?
+  createdAt   DateTime @default(now())
+  buyOrders   Order[]  @relation("buyer")
+  sellOrders  Order[]  @relation("seller")
+}
+
+model Order {
+  id                 String        @id @default(cuid())
+  code               String        @unique
+  shareCode          String        @unique
+  title              String
+  specText           String
+  checklistItems     String        @default("[]") // JSON string[]
+  priceSatang        Int
+  feeSatang          Int
+  status             String        @default("CREATED")
+  createdById        String
+  creatorRole        String        // BUYER | SELLER
+  counterpartyHandle String?
+  buyerId            String?
+  sellerId           String?
+  buyer              User?         @relation("buyer", fields: [buyerId], references: [id])
+  seller             User?         @relation("seller", fields: [sellerId], references: [id])
+  paymentDeadline    DateTime?
+  shipDeadline       DateTime?
+  inspectDeadline    DateTime?
+  paidAt             DateTime?
+  shippedAt          DateTime?
+  deliveredAt        DateTime?
+  releasedAt         DateTime?
+  refundedAt         DateTime?
+  carrier            String?
+  trackingNo         String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  media              OrderMedia[]
+  events             OrderEvent[]
+  payments           Payment[]
+  ledger             LedgerEntry[]
+  dispute            Dispute?
+  rating             Rating?
+
+  @@index([status])
+}
+
+model OrderMedia {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  kind       String   // LISTING | PACKING | RECEIVED | UNBOXING_VIDEO | DISPUTE_EVIDENCE
+  url        String
+  mime       String   @default("image/jpeg")
+  uploadedBy String
+  createdAt  DateTime @default(now())
+}
+
+model OrderEvent {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  from      String?
+  to        String
+  actor     String   // userId | SYSTEM
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model Payment {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider     String
+  providerRef  String?  @unique
+  method       String   // promptpay | card | mobile_banking
+  amountSatang Int
+  status       String   // pending | succeeded | failed
+  createdAt    DateTime @default(now())
+}
+
+model LedgerEntry {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type           String   // HOLD | RELEASE_TO_SELLER | REFUND_TO_BUYER | FEE
+  amountSatang   Int
+  idempotencyKey String   @unique
+  createdAt      DateTime @default(now())
+}
+
+model Dispute {
+  id             String    @id @default(cuid())
+  orderId        String    @unique
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reason         String    // NOT_RECEIVED | NOT_AS_DESCRIBED | DAMAGED | OTHER
+  detail         String
+  mismatchItems  String    @default("[]") // JSON string[]
+  sellerResponse String?
+  resolution     String?   // REFUND | RELEASE
+  resolvedBy     String?
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+}
+
+model Rating {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now())
+}
