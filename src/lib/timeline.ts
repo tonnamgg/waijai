@@ -70,6 +70,20 @@ export function buildSteps(o: OrderDTO, role: Role | null): Step[] {
     },
   ];
 
+  // รหัสเกม: ไม่มีขนส่ง — ส่งรหัสแล้วถึงมือผู้ซื้อทันที
+  if (o.kind === "GAME_ACCOUNT") {
+    const sent = o.shippedAt ? `${formatDateTime(o.shippedAt)} · ส่งในห้องดีล` : "";
+    defs[1] = { key: "shipped", title: "ผู้ขายส่งรหัสเกมแล้ว", titleTodo: "ผู้ขายส่งรหัสเกม", sub: `ต้องส่งภายใน ${config.DIGITAL_DELIVER_HOURS} ชม. หลังจ่ายเงิน`, subDone: sent };
+    defs[2] = { key: "transit", title: "ระบบส่งรหัสให้ผู้ซื้อ", sub: "เก็บแบบเข้ารหัส เห็นเฉพาะผู้ซื้อ", subDone: "ส่งถึงทันที" };
+    defs[3] = {
+      key: "delivered",
+      title: isSeller ? "ผู้ซื้อได้รับรหัส" : "คุณได้รับรหัส",
+      sub: `มีเวลาตรวจ ${config.DIGITAL_INSPECT_HOURS} ชม.`,
+      subDone: o.deliveredAt ? `${formatDateTime(o.deliveredAt)} · เริ่มนับเวลาตรวจ` : "",
+    };
+    defs[4] = { ...defs[4], sub: isSeller ? "ผู้ซื้อล็อกอินตรวจตามเช็กลิสต์" : "ล็อกอิน ตรวจตามเช็กลิสต์ แล้วเปลี่ยนรหัสผ่าน" };
+  }
+
   const halted = o.status === "DISPUTED" || o.status === "REFUNDED" || o.status === "CANCELLED";
 
   return defs.map((d, i) => {

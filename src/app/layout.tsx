@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Thai } from "next/font/google";
 import { MotionConfig } from "framer-motion";
 import { ToastProvider } from "@/components/ui/Toast";
+import { DuoRoleCapture } from "@/components/DuoRoleCapture";
 import "./globals.css";
 
 const plex = IBM_Plex_Sans_Thai({
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans antialiased">
         <MotionConfig reducedMotion="user">
           <ToastProvider>
+            <DuoRoleCapture />
             <div className="relative mx-auto min-h-[100dvh] w-full max-w-[430px] overflow-x-hidden bg-bg sm:shadow-[0_0_0_1px_#E2E2DC,0_20px_60px_rgba(20,20,20,0.08)]">
               {children}
             </div>

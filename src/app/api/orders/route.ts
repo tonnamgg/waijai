@@ -6,6 +6,7 @@ import { createOrderSchema, parseChecklist } from "@/lib/validators";
 import { generateCodes, orderInclude, toDTO } from "@/lib/orders";
 import { config, HOUR } from "@/lib/config";
 import { HttpError } from "@/lib/http";
+import { GAME_BASE_CHECKS } from "@/lib/games";
 
 export const GET = route(async () => {
   const user = await requireUser();
@@ -28,7 +29,8 @@ export const POST = route(async (req) => {
   const handle = input.counterparty.replace(/^@/, "").trim();
   if (handle && handle === user.username) throw new HttpError(400, "อีกฝ่ายต้องไม่ใช่ตัวคุณเอง");
 
-  const checklist = parseChecklist(input.specText);
+  const isGame = input.kind === "GAME_ACCOUNT";
+  const checklist = isGame ? [...parseChecklist(input.specText).slice(0, 12 - GAME_BASE_CHECKS.length), ...GAME_BASE_CHECKS] : parseChecklist(input.specText);
   const { code, shareCode } = await generateCodes();
   const now = new Date();
 
@@ -42,10 +44,11 @@ export const POST = route(async (req) => {
       priceSatang,
       feeSatang: calcFee(priceSatang),
       createdById: user.id,
-      creatorRole: input.role,
+      creatorRole: "SELLER",
+      kind: input.kind,
+      meta: isGame ? JSON.stringify({ game: input.game, region: input.region, rank: input.rank }) : "{}",
       counterpartyHandle: handle ? (/^\d+$/.test(handle) ? handle : `@${handle}`) : null,
-      buyerId: input.role === "BUYER" ? user.id : null,
-      sellerId: input.role === "SELLER" ? user.id : null,
+      sellerId: user.id,
       paymentDeadline: new Date(now.getTime() + config.PAYMENT_DEADLINE_HOURS * HOUR),
       media: {
         create: input.photoUrls.map((url) => ({ kind: "LISTING", url, uploadedBy: user.id })),

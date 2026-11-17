@@ -1,12 +1,13 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Clock, Link2, ListChecks, Share2, Truck } from "lucide-react";
+import { Check, Clock, KeyRound, Link2, ListChecks, Share2, Truck, Wallet } from "lucide-react";
+import { config } from "@/lib/config";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { readDuoRole } from "@/components/DuoRoleCapture";
 import clsx from "clsx";
 import { TopBar } from "@/components/ui/TopBar";
-import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { MediaPicker } from "@/components/MediaPicker";
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
@@ -14,8 +15,10 @@ import { CopyButton } from "@/components/CopyButton";
 import { api, type Uploaded } from "@/components/ui/client-api";
 import { useToast } from "@/components/ui/Toast";
 import { bahtToSatang, calcFee, formatTHB } from "@/lib/money";
+import { publicOrigin } from "@/lib/room";
+import { GAME_BASE_CHECKS, GAMES, gameById } from "@/lib/games";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 
-type Role = "SELLER" | "BUYER";
 type Created = { id: string; shareUrl: string; code: string };
 
 function parseLines(text: string) {
@@ -26,10 +29,20 @@ function parseLines(text: string) {
     .slice(0, 12);
 }
 
+const digital = { deliverHours: config.DIGITAL_DELIVER_HOURS, inspectHours: config.DIGITAL_INSPECT_HOURS };
+
 export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; inspectHours: number }) {
   const router = useRouter();
   const toast = useToast();
-  const [role, setRole] = useState<Role>("BUYER");
+  // ผู้ขายเป็นคนเปิดดีลเสมอ — ผู้ซื้อแค่วางลิงก์ที่ได้รับ
+  const [duoBuyerScreen, setDuoBuyerScreen] = useState(false);
+  useEffect(() => setDuoBuyerScreen(readDuoRole() === "BUYER"), []);
+  const [kind, setKind] = useState<"PHYSICAL" | "GAME_ACCOUNT">("PHYSICAL");
+  const [game, setGame] = useState<string>("");
+  const [rank, setRank] = useState("");
+  const [region, setRegion] = useState("");
+  const isGame = kind === "GAME_ACCOUNT";
+  const g = gameById(game);
   const [photos, setPhotos] = useState<Uploaded[]>([]);
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("");
@@ -56,19 +69,21 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
 
   async function submit() {
     const errs: Record<string, boolean> = {
+      game: isGame && !game,
       title: !title.trim(),
       price: priceSatang < 100,
       specText: !specText.trim(),
-      photos: role === "SELLER" && photos.length === 0,
+      photos: photos.length === 0,
     };
     setErrors(errs);
     const firstErr = Object.entries(errs).find(([, v]) => v)?.[0];
     if (firstErr) {
       const msg: Record<string, string> = {
+        game: "กรุณาเลือกเกม",
         title: "กรุณาใส่ชื่อสินค้า",
         price: "กรุณาใส่ราคาให้ถูกต้อง (อย่างน้อย ฿1)",
         specText: "กรุณาใส่รายละเอียดที่ต้องตรงปก",
-        photos: "ผู้ขายต้องใส่รูปสินค้าจริงอย่างน้อย 1 รูป",
+        photos: isGame ? "ใส่ภาพหน้าจอบัญชีอย่างน้อย 1 รูป" : "ผู้ขายต้องใส่รูปสินค้าจริงอย่างน้อย 1 รูป",
       };
       toast(msg[firstErr], "error");
       return;
@@ -76,12 +91,14 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
     setBusy(true);
     try {
       const res = await api<Created>("/api/orders", {
-        role,
+        role: "SELLER",
         title,
         price: price.replace(/,/g, ""),
         counterparty,
         specText,
         photoUrls: photos.map((p) => p.url),
+        kind,
+        ...(isGame ? { game, rank, region } : {}),
       });
       setCreated(res);
     } catch (e) {
@@ -91,25 +108,77 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
     }
   }
 
-  const fullLink = created ? `${typeof window !== "undefined" ? window.location.origin : ""}${created.shareUrl}` : "";
+  const fullLink = created ? `${publicOrigin()}${created.shareUrl}` : "";
 
   return (
     <main className="pb-32">
-      <TopBar title="สร้างรายการซื้อขาย" back="/" />
+      <TopBar title="ลงขายสินค้า" back="/" />
       <div className="space-y-5 px-5">
+        {duoBuyerScreen && (
+          <p className="rounded-btn bg-warn-soft px-4 py-3 text-[14px] leading-relaxed text-warn-text">
+            จอนี้คือ<b>ผู้ซื้อ</b> — ผู้ซื้อไม่ต้องสร้างรายการ ให้รอลิงก์จากผู้ขาย แล้ววางที่หน้าแรก
+          </p>
+        )}
         <SegmentedControl
-          value={role}
-          onChange={setRole}
+          value={kind}
+          onChange={setKind}
           options={[
-            { value: "SELLER", label: "ฉันเป็นผู้ขาย" },
-            { value: "BUYER", label: "ฉันเป็นผู้ซื้อ" },
+            { value: "PHYSICAL", label: "สินค้าทั่วไป" },
+            { value: "GAME_ACCOUNT", label: "รหัสเกม" },
           ]}
         />
+        <p className="-mt-2 flex items-start gap-2 rounded-btn bg-soft px-4 py-3 text-[14px] leading-relaxed text-[#3E3E3A]">
+          <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <span>
+            ส่งลิงก์ให้ผู้ซื้อ · <b>ผู้ซื้อแค่เปิดลิงก์แล้วโอนเงิน</b>เข้าตัวกลาง
+            {isGame ? " คุณส่งไอดี/รหัสผ่านในห้องดีล (เข้ารหัสไว้) ได้เงินเมื่อผู้ซื้อล็อกอินตรวจแล้วยืนยัน" : " คุณส่งของ แล้วได้เงินเมื่อผู้ซื้อยืนยันว่าตรงปก"}
+          </span>
+        </p>
+
+        <AnimatePresence initial={false}>
+          {isGame && (
+            <motion.section
+              key="game"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-4 overflow-hidden"
+            >
+              <div>
+                <span className={clsx("label", errors.game && "text-warn-text")}>เกม</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {GAMES.map((x) => (
+                    <button
+                      key={x.id}
+                      type="button"
+                      onClick={() => { setGame(x.id); setErrors((e) => ({ ...e, game: false })); }}
+                      className={clsx(
+                        "flex h-11 items-center gap-2 rounded-btn border px-2.5 text-left text-[13px] font-semibold transition-colors",
+                        game === x.id ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink hover:bg-soft",
+                      )}
+                    >
+                      <span className={clsx("shrink-0 text-[11px] font-bold", game === x.id ? "text-white/70" : "text-muted")}>{x.short}</span>
+                      <span className="truncate">{x.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="แรงก์ / เลเวล">
+                  <input className="input" value={rank} maxLength={60} placeholder={g?.rankHint ?? "เช่น Diamond 2"} onChange={(e) => setRank(e.target.value)} />
+                </Field>
+                <Field label="เซิร์ฟเวอร์">
+                  <input className="input" value={region} maxLength={30} placeholder={g?.regionHint ?? "เช่น TH"} onChange={(e) => setRegion(e.target.value)} />
+                </Field>
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
 
         <motion.section animate={errors.photos ? { x: [0, -8, 8, -5, 5, 0] } : {}} transition={{ duration: 0.4 }}>
           <p className="mb-2.5 text-[15px]">
-            <b className="font-semibold">รูปสินค้าจริง</b>
-            <span className="text-muted"> · ใช้เทียบตอนรับของ{role === "SELLER" ? " (อย่างน้อย 1 รูป)" : ""}</span>
+            <b className="font-semibold">{isGame ? "ภาพหน้าจอบัญชี" : "รูปสินค้าจริง"}</b>
+            <span className="text-muted">{isGame ? " · หน้าโปรไฟล์ แรงก์ สกิน/ตัวละคร (อย่างน้อย 1 รูป)" : " · ใช้เทียบตอนรับของ (อย่างน้อย 1 รูป)"}</span>
           </p>
           <MediaPicker value={photos} onChange={(v) => { setPhotos(v); setErrors((e) => ({ ...e, photos: false })); }} max={4} />
         </motion.section>
@@ -119,7 +188,7 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
             className={clsx("input", errors.title && "border-warn")}
             value={title}
             maxLength={120}
-            placeholder="เช่น หูฟังไร้สาย สีดำ"
+            placeholder={isGame ? `เช่น ไอดี ${g?.name ?? "Valorant"} ${rank || "แรงก์สูง"} สกินเยอะ` : "เช่น หูฟังไร้สาย สีดำ"}
             onChange={(e) => { setTitle(e.target.value); setErrors((x) => ({ ...x, title: false })); }}
           />
         </Field>
@@ -135,7 +204,7 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
               onBlur={formatPriceOnBlur}
             />
           </Field>
-          <Field label={role === "BUYER" ? "ผู้ขาย" : "ผู้ซื้อ"}>
+          <Field label="ผู้ซื้อ (ไม่บังคับ)">
             <input className="input" value={counterparty} maxLength={50} placeholder="@ชื่อผู้ใช้ / เบอร์" onChange={(e) => setCounterparty(e.target.value)} />
           </Field>
         </div>
@@ -162,20 +231,24 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
           <textarea
             className={clsx("textarea min-h-[120px]", errors.specText && "border-warn")}
             value={specText}
-            placeholder={"สี ขนาด รุ่น สภาพ ตำหนิ อุปกรณ์\nพิมพ์บรรทัดละ 1 ข้อ — จะกลายเป็นเช็กลิสต์ตอนรับของ"}
+            placeholder={
+              isGame
+                ? "แรงก์ เลเวล สกิน/ตัวละครที่มี ไอเทมเด่น\nพิมพ์บรรทัดละ 1 ข้อ — ผู้ซื้อจะล็อกอินตรวจตามนี้"
+                : "สี ขนาด รุ่น สภาพ ตำหนิ อุปกรณ์\nพิมพ์บรรทัดละ 1 ข้อ — จะกลายเป็นเช็กลิสต์ตอนรับของ"
+            }
             onChange={(e) => { setSpecText(e.target.value); setErrors((x) => ({ ...x, specText: false })); }}
           />
         </Field>
 
         <AnimatePresence>
-          {checklist.length > 0 && (
+          {(checklist.length > 0 || isGame) && (
             <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="-mt-2 overflow-hidden">
               <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-muted">
-                <ListChecks className="h-4 w-4" /> เช็กลิสต์ที่ผู้ซื้อจะใช้ตรวจ ({checklist.length})
+                <ListChecks className="h-4 w-4" /> เช็กลิสต์ที่ผู้ซื้อจะใช้ตรวจ ({checklist.length + (isGame ? GAME_BASE_CHECKS.length : 0)})
               </p>
               <div className="flex flex-wrap gap-1.5">
                 <AnimatePresence initial={false}>
-                  {checklist.map((c, i) => (
+                  {[...checklist, ...(isGame ? GAME_BASE_CHECKS : [])].map((c, i) => (
                     <motion.span
                       key={c + i}
                       layout
@@ -195,19 +268,24 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
 
         <div className="space-y-3 rounded-[16px] bg-soft px-5 py-4">
           <p className="flex items-center gap-3 text-[15px] text-[#3E3E3A]">
-            <Truck className="h-[22px] w-[22px] shrink-0 text-accent" strokeWidth={1.9} />
-            ผู้ขายต้องส่งภายใน {shipDays} วัน ไม่ส่ง = คืนเงินอัตโนมัติ
+            {isGame ? <KeyRound className="h-[22px] w-[22px] shrink-0 text-accent" strokeWidth={1.9} /> : <Truck className="h-[22px] w-[22px] shrink-0 text-accent" strokeWidth={1.9} />}
+            {isGame ? `ผู้ขายต้องส่งรหัสภายใน ${digital.deliverHours} ชม. ไม่ส่ง = คืนเงินอัตโนมัติ` : `ผู้ขายต้องส่งภายใน ${shipDays} วัน ไม่ส่ง = คืนเงินอัตโนมัติ`}
           </p>
           <p className="flex items-center gap-3 text-[15px] text-[#3E3E3A]">
             <Clock className="h-[22px] w-[22px] shrink-0 text-accent" strokeWidth={1.9} />
-            ผู้ซื้อตรวจของภายใน {inspectHours} ชม. หลังของถึง
+            {isGame ? `ผู้ซื้อตรวจรหัสภายใน ${digital.inspectHours} ชม. หลังได้รับ` : `ผู้ซื้อตรวจของภายใน ${inspectHours} ชม. หลังของถึง`}
           </p>
+          {isGame && (
+            <p className="border-t border-line pt-3 text-[12px] leading-relaxed text-muted">
+              บางเกมห้ามซื้อขายบัญชีในข้อตกลงผู้ใช้ และบัญชีอาจถูกระงับได้ ไว้ใจคุ้มครองการส่งมอบตามที่ตกลงในดีลเท่านั้น
+            </p>
+          )}
         </div>
       </div>
 
       <div className="fixed bottom-0 left-1/2 z-30 w-full max-w-[430px] -translate-x-1/2 bg-gradient-to-t from-bg via-bg to-bg/0 px-5 pb-6 pt-6">
         <Button onClick={submit} loading={busy} icon={<Link2 className="h-5 w-5" strokeWidth={2.2} />}>
-          สร้างและส่งลิงก์ให้อีกฝ่าย
+          สร้างลิงก์ส่งให้ผู้ซื้อ
         </Button>
       </div>
 
@@ -224,7 +302,7 @@ export function NewOrderForm({ shipDays, inspectHours }: { shipDays: number; ins
             </motion.div>
             <h2 className="mt-4 text-[22px] font-bold">สร้างรายการแล้ว</h2>
             <p className="mt-1 text-[15px] text-muted">
-              ส่งลิงก์นี้ให้{role === "BUYER" ? "ผู้ขาย" : "ผู้ซื้อ"}กดรับรายการ · เลขรายการ {created.code}
+              ส่งลิงก์นี้ให้ผู้ซื้อ · ผู้ซื้อวางลิงก์ที่หน้าแรกหรือเปิดลิงก์ แล้วกดรับรายการ · เลขรายการ {created.code}
             </p>
             <div className="mt-5 flex items-center gap-2 rounded-btn bg-soft p-2 pl-4 text-left">
               <span className="flex-1 truncate text-[15px] font-medium text-ink">{fullLink}</span>

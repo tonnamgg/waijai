@@ -13,7 +13,12 @@ const LABELS: Record<OrderStatus, { buyer: string; seller: string; tone: Tone }>
   CANCELLED: { buyer: "ยกเลิก", seller: "ยกเลิก", tone: "muted" },
 };
 
-export function statusLabel(status: OrderStatus, role: Role | null): { text: string; tone: Tone } {
-  const l = LABELS[status];
+const GAME_LABELS: Partial<Record<OrderStatus, { buyer: string; seller: string }>> = {
+  PAID_HELD: { buyer: "รอผู้ขายส่งรหัส", seller: "ต้องส่งรหัส" },
+  DELIVERED: { buyer: "ตรวจรหัส", seller: "รอผู้ซื้อตรวจรหัส" },
+};
+
+export function statusLabel(status: OrderStatus, role: Role | null, kind?: string): { text: string; tone: Tone } {
+  const l = { ...LABELS[status], ...(kind === "GAME_ACCOUNT" ? GAME_LABELS[status] : undefined) };
   return { text: role === "SELLER" ? l.seller : l.buyer, tone: l.tone };
 }

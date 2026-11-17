@@ -5,6 +5,7 @@ import { writeLedger } from "./ledger";
 import { transition, type Actor, type OrderEventType, type TransitionResult } from "./order-machine";
 import { HttpError } from "./http";
 import type { OrderStatus, Role } from "./types";
+import type { GameMeta } from "./games";
 
 export const orderInclude = {
   buyer: true,
@@ -13,6 +14,8 @@ export const orderInclude = {
   events: { orderBy: { createdAt: "asc" } },
   dispute: true,
   rating: true,
+  // เฉพาะเวลา — ห้ามดึง cipher ออกมาใน include ทั่วไป
+  credential: { select: { createdAt: true, revealedAt: true } },
 } satisfies Prisma.OrderInclude;
 
 export type OrderFull = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
@@ -131,7 +134,21 @@ export function toDTO(o: OrderFull) {
         }
       : null,
     rating: o.rating ? { stars: o.rating.stars, comment: o.rating.comment } : null,
+    kind: (o.kind === "GAME_ACCOUNT" ? "GAME_ACCOUNT" : "PHYSICAL") as OrderKind,
+    meta: safeMeta(o.meta),
+    credential: o.credential ? { sentAt: o.credential.createdAt.toISOString(), revealedAt: iso(o.credential.revealedAt) } : null,
   };
+}
+
+export type OrderKind = "PHYSICAL" | "GAME_ACCOUNT";
+
+function safeMeta(raw: string): GameMeta {
+  try {
+    const m = JSON.parse(raw || "{}");
+    return typeof m === "object" && m ? { game: m.game, region: m.region, rank: m.rank } : {};
+  } catch {
+    return {};
+  }
 }
 
 export type OrderDTO = ReturnType<typeof toDTO>;

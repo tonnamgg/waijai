@@ -16,6 +16,8 @@ export type OrderEventType =
   | { type: "CANCEL" }
   | { type: "PAYMENT_EXPIRED" }
   | { type: "SHIP"; carrier: string; trackingNo: string; hasPackingPhoto: boolean }
+  /** รหัสเกม: ผู้ขายส่งข้อมูลล็อกอินในห้องดีล → ถึงมือผู้ซื้อทันที (ข้าม SHIPPED) */
+  | { type: "DELIVER_CREDENTIALS"; hasCredentials: boolean }
   | { type: "SHIP_EXPIRED" }
   | { type: "MARK_DELIVERED" }
   | { type: "REPORT_NOT_RECEIVED" }
@@ -36,7 +38,11 @@ export interface MachineOrder {
   shipDeadline: Date | null;
   inspectDeadline: Date | null;
   shippedAt: Date | null;
+  /** PHYSICAL (ค่าเริ่มต้น) | GAME_ACCOUNT */
+  kind?: string;
 }
+
+const isDigital = (o: MachineOrder) => o.kind === "GAME_ACCOUNT";
 
 export interface LedgerIntent {
   type: LedgerType;
@@ -114,7 +120,7 @@ export function transition(
       return {
         from,
         to: "PAID_HELD",
-        patch: { paidAt: now, shipDeadline: new Date(t + config.SHIP_DEADLINE_HOURS * HOUR) },
+        patch: { paidAt: now, shipDeadline: new Date(t + (isDigital(o) ? config.DIGITAL_DELIVER_HOURS : config.SHIP_DEADLINE_HOURS) * HOUR) },
         ledger: [{ type: "HOLD", amountSatang: o.priceSatang + o.feeSatang, idempotencyKey: `${o.id}:HOLD` }],
         note: "ไว้ใจพักเงินไว้",
       };
@@ -130,9 +136,24 @@ export function transition(
       ensure(!!o.paymentDeadline && t >= o.paymentDeadline.getTime(), "ยังไม่หมดเวลาชำระเงิน", "PRECONDITION");
       return { from, to: "CANCELLED", patch: {}, ledger: [], note: "หมดเวลาชำระเงิน ยกเลิกอัตโนมัติ" };
     }
+    case "DELIVER_CREDENTIALS": {
+      expectStatus(o, "PAID_HELD");
+      ensure(isSeller(actor, o), "เฉพาะผู้ขายเท่านั้น");
+      ensure(isDigital(o), "รายการนี้เป็นสินค้าที่ต้องส่งพัสดุ", "PRECONDITION");
+      ensure(event.hasCredentials, "กรุณาใส่ข้อมูลล็อกอิน", "PRECONDITION");
+      ensure(!o.shipDeadline || t < o.shipDeadline.getTime(), "เลยกำหนดส่งรหัสแล้ว", "PRECONDITION");
+      return {
+        from,
+        to: "DELIVERED",
+        patch: { shippedAt: now, deliveredAt: now, carrier: "ส่งรหัสในห้องดีล", inspectDeadline: new Date(t + config.DIGITAL_INSPECT_HOURS * HOUR) },
+        ledger: [],
+        note: "ผู้ขายส่งรหัสเกมแล้ว",
+      };
+    }
     case "SHIP": {
       expectStatus(o, "PAID_HELD");
       ensure(isSeller(actor, o), "เฉพาะผู้ขายเท่านั้น");
+      ensure(!isDigital(o), "รหัสเกมไม่ต้องส่งพัสดุ — ใช้ปุ่มส่งรหัสเกมแทน", "PRECONDITION");
       ensure(event.trackingNo.trim().length >= 5, "เลขพัสดุไม่ถูกต้อง", "PRECONDITION");
       ensure(event.hasPackingPhoto, "ต้องแนบรูปตอนแพ็กของอย่างน้อย 1 รูป", "PRECONDITION");
       ensure(!o.shipDeadline || t < o.shipDeadline.getTime(), "เลยกำหนดส่งของแล้ว", "PRECONDITION");

@@ -36,7 +36,16 @@ export default async function SharePage({ params }: { params: Promise<{ shareCod
         checklist: JSON.parse(order.checklistItems) as string[],
         photos: order.media.map((m) => m.url),
         shipDays: config.SHIP_DEADLINE_HOURS / 24,
-        inspectHours: config.INSPECT_WINDOW_HOURS,
+        inspectHours: order.kind === "GAME_ACCOUNT" ? config.DIGITAL_INSPECT_HOURS : config.INSPECT_WINDOW_HOURS,
+        deliverHours: config.DIGITAL_DELIVER_HOURS,
+        kind: order.kind === "GAME_ACCOUNT" ? "GAME_ACCOUNT" : "PHYSICAL",
+        meta: (() => {
+          try {
+            return JSON.parse(order.meta || "{}");
+          } catch {
+            return {};
+          }
+        })(),
       }}
     />
   );

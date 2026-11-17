@@ -16,8 +16,7 @@ export default async function OrdersPage() {
   });
   return (
     <main className="px-5 pt-6">
-      <h1 className="text-[28px] font-bold text-ink">รายการ</h1>
-      <p className="mt-1 text-[15px] text-muted">รายการซื้อขายทั้งหมดของคุณ</p>
+      <h1 className="text-[24px] font-bold text-ink">รายการ</h1>
       <OrdersList rows={orders.map((o) => toRow(o, user.id))} />
       <BottomNav />
     </main>

@@ -4,6 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { calcFee } from "../src/lib/money";
 import { config, HOUR } from "../src/lib/config";
+import { GAME_BASE_CHECKS } from "../src/lib/games";
+import { encryptJson } from "../src/lib/secrets";
 
 const prisma = new PrismaClient();
 const now = Date.now();
@@ -16,6 +18,8 @@ const ICONS: Record<string, string> = {
     '<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>',
   shirt:
     '<path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/>',
+  gamepad:
+    '<line x1="6" x2="10" y1="12" y2="12"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="15" x2="15.01" y1="13" y2="13"/><line x1="18" x2="18.01" y1="11" y2="11"/><rect width="20" height="12" x="2" y="6" rx="2"/>',
   camera:
     '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
 };
@@ -50,6 +54,7 @@ async function main() {
     headphones: writeSeedImage("seed-headphones.svg", "headphones", "#E7ECEA", "#1F2A27"),
     jacket: writeSeedImage("seed-jacket.svg", "shirt", "#DCE6F2", "#2B4A73"),
     camera: writeSeedImage("seed-camera.svg", "camera", "#F2EADF", "#5C4425"),
+    game: writeSeedImage("seed-game.svg", "gamepad", "#E9E4F2", "#3B2C5C"),
   };
 
   // 1) หูฟัง — มินท์ซื้อจาก @gadgetbkk — กำลังจัดส่ง
@@ -97,6 +102,14 @@ async function main() {
       data: { orderId: o.id, provider: "mock", providerRef: "mock_seed_1", method: "promptpay", amountSatang: price + fee, status: "succeeded", createdAt: ago(44) },
     });
     await prisma.ledgerEntry.create({ data: { orderId: o.id, type: "HOLD", amountSatang: price + fee, idempotencyKey: `${o.id}:HOLD`, createdAt: ago(44) } });
+    await prisma.message.createMany({
+      data: [
+        { orderId: o.id, senderId: gadget.id, body: "สวัสดีครับ หูฟังตัวนี้ของใหม่ ยังไม่แกะซีลครับ", createdAt: ago(49.5) },
+        { orderId: o.id, senderId: mint.id, body: "โอเคค่ะ จ่ายเข้าไว้ใจแล้วนะคะ ส่ง Kerry ได้ไหม", createdAt: ago(44) },
+        { orderId: o.id, senderId: gadget.id, body: "ได้ครับ แพ็กกันกระแทกให้แล้ว ส่งพรุ่งนี้เช้า", createdAt: ago(43.5) },
+        { orderId: o.id, senderId: gadget.id, body: "ส่งแล้วครับ เลขพัสดุอยู่ด้านบนเลย", createdAt: ago(19.9) },
+      ],
+    });
   }
 
   // 2) แจ็กเก็ต — มินท์ขายให้ @ploy.p — รอผู้ซื้อตรวจของ
@@ -157,8 +170,8 @@ async function main() {
         priceSatang: price,
         feeSatang: fee,
         status: "PAID_HELD",
-        createdById: mint.id,
-        creatorRole: "BUYER",
+        createdById: film.id,
+        creatorRole: "SELLER",
         buyerId: mint.id,
         sellerId: film.id,
         paidAt: ago(5),
@@ -167,10 +180,11 @@ async function main() {
         updatedAt: new Date(now - 120_000),
       },
     });
-    await prisma.orderMedia.create({ data: { orderId: o.id, kind: "LISTING", url: img.camera, mime: "image/svg+xml", uploadedBy: mint.id } });
+    await prisma.orderMedia.create({ data: { orderId: o.id, kind: "LISTING", url: img.camera, mime: "image/svg+xml", uploadedBy: film.id } });
     await prisma.orderEvent.createMany({
       data: [
-        { orderId: o.id, from: null, to: "CREATED", actor: mint.id, note: "สร้างรายการ", createdAt: ago(6) },
+        { orderId: o.id, from: null, to: "CREATED", actor: film.id, note: "สร้างรายการ", createdAt: ago(6) },
+        { orderId: o.id, from: "CREATED", to: "CREATED", actor: mint.id, note: "@mint รับรายการแล้ว", createdAt: ago(5.5) },
         { orderId: o.id, from: "CREATED", to: "PAID_HELD", actor: "SYSTEM", note: "ไว้ใจพักเงินไว้", createdAt: ago(5) },
       ],
     });
@@ -180,7 +194,63 @@ async function main() {
     await prisma.ledgerEntry.create({ data: { orderId: o.id, type: "HOLD", amountSatang: price + fee, idempotencyKey: `${o.id}:HOLD`, createdAt: ago(5) } });
   }
 
-  console.log("Seed complete: users mint / gadgetbkk / ploy.p / filmhouse / admin + 3 orders");
+  // 4) รหัสเกม Valorant — พลอยขายให้มินท์ — ส่งรหัสแล้ว รอผู้ซื้อตรวจ
+  {
+    const price = 1890_00;
+    const fee = calcFee(price);
+    const spec = ["แรงก์ Diamond 2", "สกิน Vandal 4 ตัว + มีด 1 เล่ม", "เลเวลบัญชี 120"];
+    const o = await prisma.order.create({
+      data: {
+        code: "WJ-24833",
+        shareCode: "vlrnt04",
+        title: "ไอดี Valorant Diamond สกินเยอะ",
+        specText: spec.join("\n"),
+        checklistItems: JSON.stringify([...spec, ...GAME_BASE_CHECKS]),
+        priceSatang: price,
+        feeSatang: fee,
+        status: "DELIVERED",
+        kind: "GAME_ACCOUNT",
+        meta: JSON.stringify({ game: "valorant", region: "AP", rank: "Diamond 2" }),
+        createdById: ploy.id,
+        creatorRole: "SELLER",
+        buyerId: mint.id,
+        sellerId: ploy.id,
+        paidAt: ago(3),
+        shipDeadline: new Date(ago(3).getTime() + config.DIGITAL_DELIVER_HOURS * HOUR),
+        shippedAt: ago(2),
+        deliveredAt: ago(2),
+        carrier: "ส่งรหัสในห้องดีล",
+        inspectDeadline: new Date(ago(2).getTime() + config.DIGITAL_INSPECT_HOURS * HOUR),
+        createdAt: ago(4),
+        updatedAt: new Date(now - 60_000),
+      },
+    });
+    await prisma.orderMedia.create({ data: { orderId: o.id, kind: "LISTING", url: img.game, mime: "image/svg+xml", uploadedBy: ploy.id } });
+    await prisma.orderEvent.createMany({
+      data: [
+        { orderId: o.id, from: null, to: "CREATED", actor: ploy.id, note: "สร้างรายการ", createdAt: ago(4) },
+        { orderId: o.id, from: "CREATED", to: "CREATED", actor: mint.id, note: "@mint รับรายการแล้ว", createdAt: ago(3.5) },
+        { orderId: o.id, from: "CREATED", to: "PAID_HELD", actor: "SYSTEM", note: "ไว้ใจพักเงินไว้", createdAt: ago(3) },
+        { orderId: o.id, from: "PAID_HELD", to: "DELIVERED", actor: ploy.id, note: "ผู้ขายส่งรหัสเกมแล้ว", createdAt: ago(2) },
+      ],
+    });
+    await prisma.credential.create({
+      data: { orderId: o.id, cipher: encryptJson({ login: "ploy_vl_demo", password: "Demo-Passw0rd!", note: "อีเมลที่ผูก: ploy.demo@example.com (ปลดเบอร์แล้ว)" }), createdAt: ago(2) },
+    });
+    await prisma.payment.create({
+      data: { orderId: o.id, provider: "mock", providerRef: "mock_seed_4", method: "promptpay", amountSatang: price + fee, status: "succeeded", createdAt: ago(3) },
+    });
+    await prisma.ledgerEntry.create({ data: { orderId: o.id, type: "HOLD", amountSatang: price + fee, idempotencyKey: `${o.id}:HOLD`, createdAt: ago(3) } });
+    await prisma.message.createMany({
+      data: [
+        { orderId: o.id, senderId: mint.id, body: "ผูกเบอร์หรือ 2FA ไว้ไหม?", createdAt: ago(3.4) },
+        { orderId: o.id, senderId: ploy.id, body: "ปลดเบอร์ให้แล้ว จ่ายเข้าไว้ใจได้เลย", createdAt: ago(3.3) },
+        { orderId: o.id, senderId: ploy.id, body: "ส่งรหัสแล้วนะ ล็อกอินแล้วเปลี่ยนรหัสได้เลย", createdAt: ago(1.95) },
+      ],
+    });
+  }
+
+  console.log("Seed complete: users mint / gadgetbkk / ploy.p / filmhouse / admin + 4 orders (รวมรหัสเกม 1)");
 }
 
 main()

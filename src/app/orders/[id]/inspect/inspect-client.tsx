@@ -17,6 +17,7 @@ import { Stagger, FadeUp } from "@/components/ui/motion";
 import { formatTHB } from "@/lib/money";
 import { DISPUTE_REASON_LABEL, type DisputeReason } from "@/lib/types";
 import type { OrderDTO } from "@/lib/orders";
+import { CredentialCard } from "@/components/game/GameParts";
 
 export function InspectClient({ order: o }: { order: OrderDTO }) {
   const router = useRouter();
@@ -82,11 +83,17 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
   }
 
   const latestReceived = received[received.length - 1];
+  const isGame = o.kind === "GAME_ACCOUNT";
 
   return (
     <main className="pb-48">
-      <TopBar title="ตรวจของก่อนปล่อยเงิน" back={`/orders/${o.id}`} />
+      <TopBar title={isGame ? "ตรวจรหัสก่อนปล่อยเงิน" : "ตรวจของก่อนปล่อยเงิน"} back={`/orders/${o.id}`} />
       <Stagger className="space-y-5 px-5">
+        {isGame && (
+          <FadeUp>
+            <CredentialCard o={o} viewer="BUYER" />
+          </FadeUp>
+        )}
         {o.inspectDeadline && (
           <FadeUp>
             <div className="flex gap-3 rounded-[16px] bg-warn-soft px-5 py-4 text-[16px] leading-relaxed text-warn-text">
@@ -112,7 +119,7 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
                   <ImageIcon className="h-10 w-10 text-[#9C9C95]" strokeWidth={1.5} />
                 )}
               </div>
-              <figcaption className="mt-2 text-center text-[14px] text-muted">รูปจากผู้ขาย</figcaption>
+              <figcaption className="mt-2 text-center text-[14px] text-muted">{isGame ? "ภาพจากผู้ขาย" : "รูปจากผู้ขาย"}</figcaption>
             </figure>
             <figure>
               <motion.button
@@ -141,7 +148,7 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
                   ) : (
                     <motion.span key="e" className="flex flex-col items-center gap-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                       <Camera className="h-7 w-7" strokeWidth={1.8} />
-                      <span className="text-[15px]">ถ่ายของที่ได้รับ</span>
+                      <span className="text-[15px]">{isGame ? "แนบภาพหน้าจอ" : "ถ่ายของที่ได้รับ"}</span>
                     </motion.span>
                   )}
                 </AnimatePresence>
@@ -151,8 +158,8 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
                   </span>
                 )}
               </motion.button>
-              <figcaption className="mt-2 text-center text-[14px] text-muted">ของที่คุณได้รับ</figcaption>
-              <input ref={photoInput} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { upload(e.target.files?.[0], "RECEIVED"); e.target.value = ""; }} />
+              <figcaption className="mt-2 text-center text-[14px] text-muted">{isGame ? "หน้าจอหลังล็อกอิน" : "ของที่คุณได้รับ"}</figcaption>
+              <input ref={photoInput} type="file" accept="image/*" capture={isGame ? undefined : "environment"} hidden onChange={(e) => { upload(e.target.files?.[0], "RECEIVED"); e.target.value = ""; }} />
             </figure>
           </div>
         </FadeUp>
@@ -161,7 +168,7 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
           <Checklist items={o.checklistItems} checked={checked} onToggle={(i) => setChecked((c) => c.map((v, j) => (j === i ? !v : v)))} />
         </FadeUp>
 
-        <FadeUp>
+        <FadeUp className={isGame ? "hidden" : undefined}>
           <motion.button
             type="button"
             whileTap={{ scale: 0.98 }}
@@ -182,9 +189,9 @@ export function InspectClient({ order: o }: { order: OrderDTO }) {
         transition={{ type: "spring", stiffness: 280, damping: 30, delay: 0.35 }}
         className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-[430px] space-y-3 bg-gradient-to-t from-bg via-bg to-bg/0 px-5 pb-6 pt-8"
       >
-        <Button onClick={() => setConfirmOpen(true)}>ของตรงปก · ปล่อยเงินให้ผู้ขาย</Button>
+        <Button onClick={() => setConfirmOpen(true)}>{isGame ? "ล็อกอินได้ ตรงตามที่ตกลง · ปล่อยเงิน" : "ของตรงปก · ปล่อยเงินให้ผู้ขาย"}</Button>
         <Button variant="warn" icon={<TriangleAlert className="h-5 w-5" />} onClick={() => setDisputeOpen(true)}>
-          ไม่ตรงปก · ขอคืนเงิน
+          {isGame ? "เข้าไม่ได้ / ไม่ตรง · ขอคืนเงิน" : "ไม่ตรงปก · ขอคืนเงิน"}
         </Button>
       </motion.div>
 
@@ -269,7 +276,7 @@ function DisputeSheet({
     }
   }
 
-  const reasons: DisputeReason[] = ["NOT_AS_DESCRIBED", "DAMAGED", "OTHER"];
+  const reasons: DisputeReason[] = order.kind === "GAME_ACCOUNT" ? ["NOT_AS_DESCRIBED", "OTHER"] : ["NOT_AS_DESCRIBED", "DAMAGED", "OTHER"];
 
   return (
     <Sheet open={open} onClose={onClose} title="ไม่ตรงปก · ขอคืนเงิน">

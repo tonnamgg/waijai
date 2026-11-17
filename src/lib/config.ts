@@ -4,6 +4,9 @@ export const config = {
   SHIP_DEADLINE_HOURS: 72,
   INSPECT_WINDOW_HOURS: 48,
   DELIVERY_MAX_DAYS: 14,
+  /** รหัสเกม: ผู้ขายต้องส่งข้อมูลล็อกอินภายในกี่ชั่วโมงหลังจ่าย / ผู้ซื้อมีเวลาตรวจกี่ชั่วโมง */
+  DIGITAL_DELIVER_HOURS: 24,
+  DIGITAL_INSPECT_HOURS: 24,
   FEE_PERCENT: 2,
   FEE_MIN_SATANG: 10_00,
   /** ปัดค่าบริการลงเป็นจำนวนบาทเต็ม (฿1,290 → ฿25) */
