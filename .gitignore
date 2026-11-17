@@ -6,3 +6,4 @@ uploads/*
 !uploads/.gitkeep
 next-env.d.ts
 *.tsbuildinfo
+.claude/

@@ -3,11 +3,15 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BadgeCheck,
+  Check,
   ChevronDown,
   CircleSlash,
   Clock,
+  Columns2,
+  ExternalLink,
   FlaskConical,
   Hourglass,
+  KeyRound,
   Link2,
   Lock,
   PackageCheck,
@@ -19,7 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { TopBar } from "@/components/ui/TopBar";
 import { Thumb } from "@/components/ui/Thumb";
@@ -27,16 +31,23 @@ import { Pill } from "@/components/ui/Pill";
 import { StatusPill } from "@/components/StatusPill";
 import { Button } from "@/components/ui/Button";
 import { Sheet } from "@/components/ui/Sheet";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Timeline } from "@/components/Timeline";
 import { Countdown } from "@/components/Countdown";
 import { CopyButton } from "@/components/CopyButton";
 import { MediaPicker } from "@/components/MediaPicker";
+import { ChatFeed, Composer, quickReplies, RoomHeader, TurnLine, type SenderRole } from "@/components/room/RoomParts";
+import { useNow, useRoom } from "@/components/room/useRoom";
+import { readDuoRole } from "@/components/DuoRoleCapture";
+import { CredentialCard, CredentialSheet } from "@/components/game/GameParts";
+import { gameTitle } from "@/lib/games";
 import { api, type Uploaded } from "@/components/ui/client-api";
 import { useToast } from "@/components/ui/Toast";
 import { buildSteps } from "@/lib/timeline";
 import { formatTHB } from "@/lib/money";
 import { formatDateTime } from "@/lib/format";
 import { DAY } from "@/lib/config";
+import { eventLines, publicOrigin, type RoomSnapshot } from "@/lib/room";
 import { ACTIVE_STATUSES, CARRIERS, DISPUTE_REASON_LABEL, type DisputeReason, type Role } from "@/lib/types";
 import type { OrderDTO } from "@/lib/orders";
 
@@ -47,11 +58,18 @@ type Props = {
   otherUsername: string | null;
   deliveryMaxDays: number;
   devTools: boolean;
+  room: RoomSnapshot;
+  /** หน้าต่างนี้ล็อกผู้ใช้จาก URL (<username>.localhost) */
+  hostLocked: boolean;
 };
 
-export function OrderTracking({ order: o, role, me, otherUsername, deliveryMaxDays, devTools }: Props) {
+type Tab = "chat" | "deal";
+
+/** ห้องดีล: ผู้ซื้อ ↔ ผู้ขาย เห็นกันและกัน คุยกัน และรู้ว่าตอนนี้ถึงตาใคร */
+export function OrderTracking({ order: o, role, me, otherUsername, deliveryMaxDays, devTools, room: initialRoom, hostLocked }: Props) {
   const router = useRouter();
   const toast = useToast();
+  const [tab, setTab] = useState<Tab>("chat");
   const [busy, setBusy] = useState<string | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
   const [notReceivedOpen, setNotReceivedOpen] = useState(false);
@@ -60,21 +78,47 @@ export function OrderTracking({ order: o, role, me, otherUsername, deliveryMaxDa
   const isBuyer = role === "BUYER";
   const isSeller = role === "SELLER";
   const isCreator = o.createdById === me.id;
-  const steps = useMemo(() => buildSteps(o, role), [o, role]);
-  const thumb = o.media.find((m) => m.kind === "LISTING")?.url;
-  const other = isSeller ? o.buyer : o.seller;
-  const otherLabel = other ? `@${other.username}` : o.counterpartyHandle ?? "รอรับรายการ";
-  const amount = isSeller ? o.priceSatang : o.priceSatang + o.feeSatang;
-  const held = ACTIVE_STATUSES.includes(o.status);
-  const shareLink = typeof window !== "undefined" ? `${window.location.origin}/o/${o.shareCode}` : `/o/${o.shareCode}`;
+  const isGame = o.kind === "GAME_ACCOUNT";
+  const [credOpen, setCredOpen] = useState(false);
 
-  // รีเฟรชข้อมูลเป็นระยะ (เห็นการกระทำของอีกฝ่าย / cron)
-  useEffect(() => {
-    const t = setInterval(() => router.refresh(), 10_000);
-    return () => clearInterval(t);
-  }, [router]);
+  const [duoRole, setDuoRole] = useState<Role | null>(null);
+  useEffect(() => setDuoRole(readDuoRole()), []);
+
+  const [shareLink, setShareLink] = useState(`/o/${o.shareCode}`);
+  useEffect(() => setShareLink(`${publicOrigin()}/o/${o.shareCode}`), [o.shareCode]);
 
   const refresh = useCallback(() => router.refresh(), [router]);
+  const room = useRoom(o.id, initialRoom, refresh);
+  const now = useNow();
+
+  const people = useMemo(() => {
+    const map = new Map<string, { name: string; handle: string; role: SenderRole }>();
+    if (o.buyer) map.set(o.buyer.id, { name: o.buyer.displayName, handle: `@${o.buyer.username}`, role: "BUYER" });
+    if (o.seller) map.set(o.seller.id, { name: o.seller.displayName, handle: `@${o.seller.username}`, role: "SELLER" });
+    return {
+      nameOf: (id: string) => map.get(id)?.name ?? "แอดมิน",
+      handleOf: (id: string) => map.get(id)?.handle ?? "แอดมิน",
+      roleOf: (id: string): SenderRole => map.get(id)?.role ?? "ADMIN",
+    };
+  }, [o.buyer, o.seller]);
+
+  // อีกฝ่ายทำให้ดีลขยับ (เช่น จ่ายเงิน / ส่งของ / เข้าห้อง) → เด้งแจ้งเตือน
+  const lastEventId = useRef(o.events.at(-1)?.id);
+  useEffect(() => {
+    const last = o.events.at(-1);
+    if (!last || last.id === lastEventId.current) return;
+    lastEventId.current = last.id;
+    if (last.actor === me.id) return;
+    const line = eventLines(o, (id) => people.handleOf(id)).at(-1);
+    if (line) toast(line.text, "info");
+  }, [o, me.id, people, toast]);
+
+  // จำนวนข้อความใหม่จากอีกฝ่ายตอนอยู่แท็บรายละเอียด
+  const [seenMsgs, setSeenMsgs] = useState(room.messages.length);
+  useEffect(() => {
+    if (tab === "chat") setSeenMsgs(room.messages.length);
+  }, [tab, room.messages.length]);
+  const unread = tab === "deal" ? room.messages.slice(seenMsgs).filter((m) => m.senderId !== me.id).length : 0;
 
   async function run(key: string, fn: () => Promise<unknown>, success?: string) {
     setBusy(key);
@@ -97,105 +141,149 @@ export function OrderTracking({ order: o, role, me, otherUsername, deliveryMaxDa
   }
 
   const canReportNotReceived = !!o.shippedAt && Date.now() - new Date(o.shippedAt).getTime() >= deliveryMaxDays * DAY;
+  const canChat = role !== null || me.isAdmin;
+  const waitingForJoin = o.status === "CREATED" && (!o.buyer || !o.seller);
+
+  // ปุ่มหลักของคนที่ "ถึงตา"
+  const action = (() => {
+    if (isBuyer && o.status === "CREATED" && o.seller)
+      return <Button onClick={() => router.push(`/orders/${o.id}/pay`)}>จ่ายเงินเข้าตัวกลาง · {formatTHB(o.priceSatang + o.feeSatang)}</Button>;
+    if (isSeller && o.status === "PAID_HELD" && isGame)
+      return (
+        <Button icon={<KeyRound className="h-5 w-5" />} onClick={() => setCredOpen(true)}>
+          ส่งรหัสเกมให้ผู้ซื้อ
+        </Button>
+      );
+    if (isSeller && o.status === "PAID_HELD")
+      return (
+        <Button icon={<Truck className="h-5 w-5" />} onClick={() => setShipOpen(true)}>
+          ส่งของแล้ว · ใส่เลขพัสดุ
+        </Button>
+      );
+    if (isBuyer && o.status === "SHIPPED")
+      return (
+        <Button loading={busy === "delivered"} onClick={receivedAndInspect}>
+          ได้รับของแล้ว · ตรวจสอบสินค้า
+        </Button>
+      );
+    if (isBuyer && o.status === "DELIVERED")
+      return (
+        <Button icon={isGame ? <KeyRound className="h-5 w-5" /> : undefined} onClick={() => router.push(`/orders/${o.id}/inspect`)}>
+          {isGame ? "ดูรหัส · ตรวจก่อนปล่อยเงิน" : "ตรวจสอบสินค้า · ก่อนปล่อยเงิน"}
+        </Button>
+      );
+    if (isBuyer && o.status === "RELEASED")
+      return (
+        <Button variant="secondary" onClick={() => router.push(`/orders/${o.id}/done`)}>
+          ดูสรุปรายการ / ให้คะแนนผู้ขาย
+        </Button>
+      );
+    if (isSeller && o.status === "DISPUTED")
+      return (
+        <Button variant="warn" icon={<Scale className="h-5 w-5" />} onClick={() => setTab("deal")}>
+          ดูข้อพิพาท · ส่งคำชี้แจง
+        </Button>
+      );
+    return null;
+  })();
 
   return (
-    <main className="pb-44">
-      <TopBar title="ติดตามสถานะ" back="/" />
-      <div className="space-y-5 px-5">
-        {/* การ์ดสรุป */}
-        <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="card p-5">
-          <div className="flex gap-4">
-            <Thumb src={thumb} size={72} icon="image" />
-            <div className="min-w-0 flex-1 pt-1">
-              <p className="truncate text-[18px] font-semibold">{o.title}</p>
-              <p className="mt-0.5 text-[15px] text-muted">
-                {isSeller ? "ขายให้" : "จาก"} {otherLabel}
-              </p>
-              <p className="mt-0.5 text-[12px] text-muted">{o.code}</p>
-            </div>
-            <div className="flex flex-col items-end gap-1.5 pt-1">
-              <span className="tabular text-[20px] font-bold">{formatTHB(amount)}</span>
-              {held ? (
-                <span className="flex items-center gap-1 text-[14px] font-semibold text-accent-dark">
-                  <Lock className="h-4 w-4" strokeWidth={2.2} /> พักไว้แล้ว
-                </span>
-              ) : (
-                <StatusPill status={o.status} role={role} />
-              )}
-            </div>
-          </div>
-          <AnimatePresence>
-            {o.trackingNo && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="overflow-hidden">
-                <div className="mt-4 flex items-center justify-between rounded-btn bg-soft px-5 py-3.5">
-                  <div>
-                    <p className="text-[13px] text-muted">เลขพัสดุ{o.carrier ? ` · ${o.carrier}` : ""}</p>
-                    <p className="tabular text-[18px] font-bold tracking-wide">{o.trackingNo}</p>
-                  </div>
-                  <CopyButton text={o.trackingNo} />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.section>
-
-        {/* แบนเนอร์ตามสถานะ */}
-        <StatusBanner o={o} role={role} isCreator={isCreator} shareLink={shareLink} />
-
-        {o.status === "DISPUTED" && o.dispute && <DisputeCard o={o} isSeller={isSeller} myId={me.id} onDone={refresh} />}
-
-        {/* Timeline */}
-        <section className="pt-1">
-          <Timeline steps={steps} />
-        </section>
-
-        {/* โหมดทดสอบ */}
-        {devTools && (
-          <DevPanel o={o} otherUsername={otherUsername} isAdmin={me.isAdmin} onChanged={refresh} />
+    <main className={tab === "chat" ? "pb-[220px]" : "pb-40"}>
+      <TopBar
+        title="ห้องดีล"
+        back="/"
+        right={<span className="mr-2 rounded-pill bg-soft px-2.5 py-1 text-[12px] font-semibold text-muted">{o.code}</span>}
+      />
+      <div className="space-y-4 px-5">
+        {duoRole && role && duoRole !== role && (
+          <p className="rounded-btn bg-warn-soft px-4 py-3 text-[14px] leading-relaxed text-warn-text">
+            ⚠ จอนี้ตั้งไว้เป็น<b>{duoRole === "SELLER" ? "ผู้ขาย" : "ผู้ซื้อ"}</b> แต่ในดีลนี้คุณเป็น<b>{role === "SELLER" ? "ผู้ขาย" : "ผู้ซื้อ"}</b> (ตอนสร้างดีลเลือก &ldquo;ฉันเป็น{role === "SELLER" ? "ผู้ขาย" : "ผู้ซื้อ"}&rdquo;) — ถ้าไม่ได้ตั้งใจ ให้สร้างดีลใหม่
+          </p>
         )}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+          <RoomHeader o={o} myRole={role} myId={me.id} presence={room.presence} now={now} />
+        </motion.div>
+
+        <SegmentedControl<Tab>
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "chat", label: unread > 0 ? `แชท (${unread} ใหม่)` : "แชท" },
+            { value: "deal", label: "รายละเอียดดีล" },
+          ]}
+        />
+
+        <AnimatePresence mode="wait" initial={false}>
+          {tab === "chat" ? (
+            <motion.div key="chat" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.2 }}>
+              <ChatFeed
+                o={o}
+                messages={room.messages}
+                myId={me.id}
+                people={{ nameOf: people.nameOf, roleOf: people.roleOf, handleOf: people.handleOf }}
+                presence={room.presence}
+                inviteLink={waitingForJoin && isCreator ? shareLink : null}
+              />
+            </motion.div>
+          ) : (
+            <motion.div key="deal" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.2 }} className="space-y-5">
+              <DealDetails o={o} role={role} isCreator={isCreator} shareLink={shareLink} />
+
+              {isGame && o.credential && <CredentialCard o={o} viewer={isBuyer ? "BUYER" : isSeller ? "SELLER" : "ADMIN"} />}
+
+              {o.status === "DISPUTED" && o.dispute && <DisputeCard o={o} isSeller={isSeller} myId={me.id} onDone={refresh} />}
+
+              <section className="pt-1">
+                <p className="mb-3 text-[15px] font-bold">ไทม์ไลน์</p>
+                <Timeline steps={buildSteps(o, role)} />
+              </section>
+
+              {isBuyer && o.status === "SHIPPED" && (
+                <button
+                  onClick={() =>
+                    canReportNotReceived
+                      ? setNotReceivedOpen(true)
+                      : toast(`แจ้ง "ของไม่มา" ได้เมื่อผู้ขายส่งของเกิน ${deliveryMaxDays} วัน ระหว่างนี้ติดตามด้วยเลขพัสดุได้เลย`, "info")
+                  }
+                  className="w-full py-2 text-center text-[15px] text-[#3E3E3A] hover:text-ink"
+                >
+                  ยังไม่ได้ของ? แจ้งปัญหา
+                </button>
+              )}
+              {isCreator && o.status === "CREATED" && (
+                <button onClick={() => setCancelOpen(true)} className="w-full py-2 text-center text-[15px] text-muted hover:text-ink">
+                  ยกเลิกรายการ
+                </button>
+              )}
+
+              {devTools && (
+                <DevPanel o={o} otherUsername={otherUsername} isAdmin={me.isAdmin} hostLocked={hostLocked} onChanged={refresh} />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* ปุ่มตามบทบาท/สถานะ */}
-      <BottomActions>
-        {isBuyer && o.status === "CREATED" && o.seller && (
-          <Button onClick={() => router.push(`/orders/${o.id}/pay`)}>จ่ายเงินเข้าตัวกลาง · {formatTHB(o.priceSatang + o.feeSatang)}</Button>
-        )}
-        {isCreator && o.status === "CREATED" && (
-          <button onClick={() => setCancelOpen(true)} className="mt-2 w-full py-2 text-center text-[15px] text-muted hover:text-ink">
-            ยกเลิกรายการ
-          </button>
-        )}
-        {isSeller && o.status === "PAID_HELD" && (
-          <Button icon={<Truck className="h-5 w-5" />} onClick={() => setShipOpen(true)}>
-            ส่งของแล้ว · ใส่เลขพัสดุ
-          </Button>
-        )}
-        {isBuyer && o.status === "SHIPPED" && (
-          <>
-            <Button loading={busy === "delivered"} onClick={receivedAndInspect}>
-              ได้รับของแล้ว · ตรวจสอบสินค้า
-            </Button>
-            <button
-              onClick={() =>
-                canReportNotReceived
-                  ? setNotReceivedOpen(true)
-                  : toast(`แจ้ง "ของไม่มา" ได้เมื่อผู้ขายส่งของเกิน ${deliveryMaxDays} วัน ระหว่างนี้ติดตามด้วยเลขพัสดุได้เลย`, "info")
+      <BottomBar>
+        {action ?? <TurnLine o={o} myRole={role} compact />}
+        {tab === "chat" && canChat && (
+          <div className="mt-2.5">
+            <Composer
+              quick={quickReplies(o, role)}
+              onTyping={room.markTyping}
+              onSend={(text) =>
+                room.send(text, me.id).catch((e) => {
+                  toast((e as Error).message, "error");
+                  throw e;
+                })
               }
-              className="mt-2 w-full py-2 text-center text-[16px] text-[#3E3E3A] hover:text-ink"
-            >
-              ยังไม่ได้ของ? แจ้งปัญหา
-            </button>
-          </>
+            />
+          </div>
         )}
-        {isBuyer && o.status === "DELIVERED" && <Button onClick={() => router.push(`/orders/${o.id}/inspect`)}>ตรวจสอบสินค้า · ก่อนปล่อยเงิน</Button>}
-        {isBuyer && o.status === "RELEASED" && (
-          <Button variant="secondary" onClick={() => router.push(`/orders/${o.id}/done`)}>
-            ดูสรุปรายการ / ให้คะแนนผู้ขาย
-          </Button>
-        )}
-      </BottomActions>
+      </BottomBar>
 
       <ShipSheet open={shipOpen} onClose={() => setShipOpen(false)} order={o} onShipped={() => { setShipOpen(false); refresh(); }} />
+      {isGame && <CredentialSheet open={credOpen} onClose={() => setCredOpen(false)} order={o} onSent={() => { setCredOpen(false); refresh(); }} />}
 
       <NotReceivedSheet open={notReceivedOpen} onClose={() => setNotReceivedOpen(false)} orderId={o.id} onDone={() => { setNotReceivedOpen(false); refresh(); }} />
 
@@ -220,18 +308,85 @@ export function OrderTracking({ order: o, role, me, otherUsername, deliveryMaxDa
   );
 }
 
-function BottomActions({ children }: { children: React.ReactNode }) {
-  const arr = Array.isArray(children) ? children.flat() : [children];
-  if (!arr.some(Boolean)) return null;
+function BottomBar({ children }: { children: React.ReactNode }) {
   return (
     <motion.div
       initial={{ y: 80, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.3 }}
-      className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-[430px] bg-gradient-to-t from-bg via-bg to-bg/0 px-5 pb-6 pt-8"
+      transition={{ type: "spring", stiffness: 300, damping: 30, delay: 0.2 }}
+      className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-[430px] bg-gradient-to-t from-bg via-bg to-bg/0 px-5 pb-5 pt-6"
     >
       {children}
     </motion.div>
+  );
+}
+
+/** แท็บรายละเอียด: สินค้า ราคา เลขพัสดุ สถานะ เช็กลิสต์ */
+function DealDetails({ o, role, isCreator, shareLink }: { o: OrderDTO; role: Role | null; isCreator: boolean; shareLink: string }) {
+  const isSeller = role === "SELLER";
+  const thumb = o.media.find((m) => m.kind === "LISTING")?.url;
+  const amount = isSeller ? o.priceSatang : o.priceSatang + o.feeSatang;
+  const held = ACTIVE_STATUSES.includes(o.status);
+  return (
+    <>
+      <section className="card p-5">
+        <div className="flex gap-4">
+          <Thumb src={thumb} size={72} icon="image" />
+          <div className="min-w-0 flex-1 pt-1">
+            <p className="truncate text-[18px] font-semibold">{o.title}</p>
+            {o.kind === "GAME_ACCOUNT" && (
+              <p className="mt-0.5 truncate text-[13px] font-semibold">
+                <span className="mr-1.5 rounded-[6px] bg-ink px-1.5 py-[1px] text-[11px] text-white">รหัสเกม</span>
+                {gameTitle(o.meta) || "รหัสเกม"}
+                {o.meta.region && o.meta.region !== "-" ? ` · เซิร์ฟ ${o.meta.region}` : ""}
+              </p>
+            )}
+            <p className="mt-0.5 text-[13px] text-muted">
+              ราคาสินค้า {formatTHB(o.priceSatang)} · ค่าบริการ {formatTHB(o.feeSatang)}
+            </p>
+            <p className="mt-0.5 text-[12px] text-muted">{o.code}</p>
+          </div>
+          <div className="flex flex-col items-end gap-1.5 pt-1">
+            <span className="tabular text-[20px] font-bold">{formatTHB(amount)}</span>
+            {held ? (
+              <span className="flex items-center gap-1 text-[14px] font-semibold text-accent-dark">
+                <Lock className="h-4 w-4" strokeWidth={2.2} /> พักไว้แล้ว
+              </span>
+            ) : (
+              <StatusPill status={o.status} role={role} kind={o.kind} />
+            )}
+          </div>
+        </div>
+        <AnimatePresence>
+          {o.trackingNo && (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="overflow-hidden">
+              <div className="mt-4 flex items-center justify-between rounded-btn bg-soft px-5 py-3.5">
+                <div>
+                  <p className="text-[13px] text-muted">เลขพัสดุ{o.carrier ? ` · ${o.carrier}` : ""}</p>
+                  <p className="tabular text-[18px] font-bold tracking-wide">{o.trackingNo}</p>
+                </div>
+                <CopyButton text={o.trackingNo} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </section>
+
+      <StatusBanner o={o} role={role} isCreator={isCreator} shareLink={shareLink} />
+
+      {o.checklistItems.length > 0 && (
+        <section className="card p-5">
+          <p className="mb-3 text-[15px] font-bold">สิ่งที่ตกลงกันว่าต้องตรงปก</p>
+          <ul className="space-y-2">
+            {o.checklistItems.map((c) => (
+              <li key={c} className="flex items-start gap-2 text-[15px]">
+                <Check className="mt-0.5 h-4 w-4 shrink-0 text-accent" strokeWidth={3} /> {c}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -261,6 +416,7 @@ function StatusBanner({ o, role, isCreator, shareLink }: { o: OrderDTO; role: Ro
   const isSeller = role === "SELLER";
   const lastNote = [...o.events].reverse().find((e) => e.to === o.status && e.from !== e.to)?.note;
   const ic = "h-5 w-5";
+  const thing = o.kind === "GAME_ACCOUNT" ? "รหัส" : "ของ";
 
   if (o.status === "CREATED") {
     const waitingFor = !o.seller ? "ผู้ขาย" : !o.buyer ? "ผู้ซื้อ" : null;
@@ -297,21 +453,21 @@ function StatusBanner({ o, role, isCreator, shareLink }: { o: OrderDTO; role: Ro
   }
   if (o.status === "PAID_HELD" && o.shipDeadline)
     return isSeller ? (
-      <Banner tone="amber" icon={<Truck className={ic} />} title="ผู้ซื้อจ่ายแล้ว · ส่งของได้เลย">
+      <Banner tone="amber" icon={<Truck className={ic} />} title={`ผู้ซื้อจ่ายแล้ว · ส่ง${thing}ได้เลย`}>
         ต้องส่งภายใน <Countdown to={o.shipDeadline} className="tabular font-semibold" /> ไม่ส่ง = คืนเงินผู้ซื้ออัตโนมัติ
       </Banner>
     ) : (
-      <Banner tone="accent" icon={<Lock className={ic} />} title="ไว้ใจพักเงินไว้แล้ว · รอผู้ขายส่งของ">
+      <Banner tone="accent" icon={<Lock className={ic} />} title={`ไว้ใจพักเงินไว้แล้ว · รอผู้ขายส่ง${thing}`}>
         ผู้ขายต้องส่งภายใน <Countdown to={o.shipDeadline} className="tabular font-semibold" /> ไม่ส่ง = คืนเงินอัตโนมัติ
       </Banner>
     );
   if (o.status === "DELIVERED" && o.inspectDeadline)
     return isSeller ? (
-      <Banner tone="accent" icon={<PackageCheck className={ic} />} title="ของถึงผู้ซื้อแล้ว · รอตรวจของ">
+      <Banner tone="accent" icon={<PackageCheck className={ic} />} title={`${thing}ถึงผู้ซื้อแล้ว · รอตรวจ${thing}`}>
         ถ้าผู้ซื้อไม่กดอะไรภายใน <Countdown to={o.inspectDeadline} className="tabular font-semibold" /> ระบบจะปล่อยเงินให้คุณอัตโนมัติ
       </Banner>
     ) : (
-      <Banner tone="amber" icon={<Clock className={ic} />} title="ตรวจของก่อนปล่อยเงิน">
+      <Banner tone="amber" icon={<Clock className={ic} />} title={`ตรวจ${thing}ก่อนปล่อยเงิน`}>
         เหลือ <Countdown to={o.inspectDeadline} className="tabular font-semibold" /> ถ้าไม่กดอะไร ระบบจะปล่อยเงินให้ผู้ขายอัตโนมัติ
       </Banner>
     );
@@ -528,8 +684,28 @@ function NotReceivedSheet({ open, onClose, orderId, onDone }: { open: boolean; o
   );
 }
 
-function DevPanel({ o, otherUsername, isAdmin, onChanged }: { o: OrderDTO; otherUsername: string | null; isAdmin: boolean; onChanged: () => void }) {
+function DevPanel({
+  o,
+  otherUsername,
+  isAdmin,
+  hostLocked,
+  onChanged,
+}: {
+  o: OrderDTO;
+  otherUsername: string | null;
+  isAdmin: boolean;
+  hostLocked: boolean;
+  onChanged: () => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [inFrame, setInFrame] = useState(false);
+  useEffect(() => setInFrame(window.self !== window.top), []);
+  const userUrl = (username: string, path: string) => {
+    const { protocol, port } = window.location;
+    return `${protocol}//${username}.localhost${port ? `:${port}` : ""}${path}`;
+  };
+  const duoUrl = () =>
+    `${publicOrigin()}/duo?buyer=${encodeURIComponent(o.buyer?.username ?? "")}&seller=${encodeURIComponent(o.seller?.username ?? "")}&path=${encodeURIComponent(`/orders/${o.id}`)}`;
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
   const router = useRouter();
@@ -567,15 +743,30 @@ function DevPanel({ o, otherUsername, isAdmin, onChanged }: { o: OrderDTO; other
         {open && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
             <div className="space-y-2 px-4 pb-4">
+              {o.buyer && o.seller && !inFrame && (
+                <Button size="md" icon={<Columns2 className="h-4 w-4" />} onClick={() => window.location.assign(duoUrl())}>
+                  ดูสองฝั่งพร้อมกัน (โหมดสองจอ)
+                </Button>
+              )}
               {otherUsername && (
                 <Button
                   size="md"
                   variant="secondary"
+                  icon={<ExternalLink className="h-4 w-4" />}
+                  onClick={() => window.open(userUrl(otherUsername, `/orders/${o.id}`), "_blank", "noopener")}
+                >
+                  เปิดจอของ @{otherUsername} ในแท็บใหม่
+                </Button>
+              )}
+              {otherUsername && !hostLocked && (
+                <Button
+                  size="md"
+                  variant="ghost"
                   icon={<UserRoundCog className="h-4 w-4" />}
                   loading={busy === "switch"}
                   onClick={() => act("switch", () => api("/api/auth/switch", { username: otherUsername }), `สลับเป็น @${otherUsername} แล้ว`, () => router.refresh())}
                 >
-                  สลับเป็นอีกฝ่าย (@{otherUsername})
+                  สลับหน้าต่างนี้เป็น @{otherUsername}
                 </Button>
               )}
               {ffLabel[o.status] && (

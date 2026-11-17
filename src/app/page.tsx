@@ -8,7 +8,7 @@ import { toRow } from "@/lib/views";
 import { BalanceCard } from "@/components/BalanceCard";
 import { BottomNav } from "@/components/BottomNav";
 import { ButtonLink } from "@/components/ui/Button";
-import { HomeHeader, HowItWorks, RecentOrders } from "./home-client";
+import { HomeHeader, JoinByLink, RecentOrders } from "./home-client";
 
 export const dynamic = "force-dynamic";
 
@@ -35,20 +35,20 @@ export default async function HomePage() {
 
   return (
     <main className="px-5 pt-6">
-      <HomeHeader name={user.displayName} hasUnread={unread > 0} />
+      <HomeHeader name={user.displayName} username={user.username} hasUnread={unread > 0} />
       <div className="mt-6">
         <BalanceCard totalSatang={total} count={active.length} />
       </div>
-      <div className="mt-4">
-        <ButtonLink href="/orders/new" icon={<Plus className="h-6 w-6" strokeWidth={2.2} />} className="h-[60px] text-[19px] hover:shadow-lift">
-          สร้างรายการซื้อขาย
+      <div className="mt-3">
+        <ButtonLink href="/orders/new" icon={<Plus className="h-5 w-5" strokeWidth={2.2} />}>
+          ลงขาย · สร้างลิงก์ให้ผู้ซื้อ
         </ButtonLink>
       </div>
-      <HowItWorks />
-      <section className="mt-7">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-[20px] font-bold text-ink">รายการล่าสุด</h2>
-          <Link href="/orders" className="text-[16px] text-accent hover:underline">
+      <JoinByLink />
+      <section className="mt-8">
+        <div className="mb-3 flex items-baseline justify-between">
+          <h2 className="text-[17px] font-bold text-ink">รายการล่าสุด</h2>
+          <Link href="/orders" className="text-[14px] text-muted hover:text-ink">
             ดูทั้งหมด
           </Link>
         </div>

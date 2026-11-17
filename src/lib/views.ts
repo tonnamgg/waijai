@@ -1,6 +1,7 @@
 import { counterpartyName, type OrderDTO, type OrderFull, toDTO, viewRole } from "./orders";
 import type { OrderListRow } from "@/components/OrderListItem";
 import type { OrderStatus } from "./types";
+import { gameById } from "./games";
 
 export function toRow(o: OrderFull, userId: string): OrderListRow {
   const dto = toDTO(o);
@@ -13,6 +14,8 @@ export function toRow(o: OrderFull, userId: string): OrderListRow {
     counterparty: counterpartyName(dto, role),
     priceSatang: o.priceSatang,
     thumb: listingThumb(dto),
+    kind: dto.kind,
+    gameName: dto.kind === "GAME_ACCOUNT" ? gameById(dto.meta.game)?.name ?? "รหัสเกม" : null,
   };
 }
 

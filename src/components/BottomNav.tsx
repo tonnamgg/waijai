@@ -9,7 +9,7 @@ import clsx from "clsx";
 const items = [
   { href: "/", label: "หน้าหลัก", icon: House },
   { href: "/orders", label: "รายการ", icon: List },
-  { href: "/orders/new", label: "สร้าง", icon: CirclePlus },
+  { href: "/orders/new", label: "ลงขาย", icon: CirclePlus },
   { href: "/account", label: "บัญชี", icon: User },
 ];
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { BadgeCheck, ChevronRight, Gavel, Loader2, Star } from "lucide-react";
+import { BadgeCheck, ChevronRight, Columns2, Gavel, Loader2, Star } from "lucide-react";
+import { publicOrigin } from "@/lib/room";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -16,11 +17,15 @@ type U = { username: string; displayName: string; role: string; kycVerified: boo
 export function AccountClient({
   me,
   users,
+  locked,
+  devTools,
   stats,
   rules,
 }: {
   me: U & { phone: string | null };
   users: U[];
+  locked: boolean;
+  devTools: boolean;
   stats: { buy: number; sell: number; receivedSatang: number; rating: number | null; ratingCount: number };
   rules: { pay: number; ship: number; inspect: number; delivery: number; feePercent: number; feeMin: number };
 }) {
@@ -45,20 +50,12 @@ export function AccountClient({
   return (
     <Stagger className="space-y-5">
       <FadeUp>
-        <h1 className="text-[28px] font-bold">บัญชี</h1>
+        <h1 className="text-[24px] font-bold">บัญชี</h1>
       </FadeUp>
 
       <FadeUp>
         <section className="card flex items-center gap-4 p-5">
-          <motion.div
-            key={me.username}
-            initial={{ scale: 0.6, rotate: -20 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 15 }}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-accent text-[26px] font-bold text-white"
-          >
-            {me.displayName.slice(0, 1)}
-          </motion.div>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-ink text-[22px] font-bold text-white">{me.displayName.slice(0, 1)}</div>
           <div className="min-w-0 flex-1">
             <p className="flex items-center gap-1.5 text-[20px] font-bold">
               {me.displayName} {me.kycVerified && <BadgeCheck className="h-5 w-5 text-accent" />}
@@ -102,11 +99,43 @@ export function AccountClient({
         </FadeUp>
       )}
 
+      {devTools && (
+        <FadeUp>
+          <a
+            href="/duo"
+            onClick={(e) => {
+              // ถ้าอยู่ในจอของโหมดสองจออยู่แล้ว ให้เปิดที่หน้าต่างบนสุด
+              if (window.top && window.top !== window.self) {
+                e.preventDefault();
+                window.open(`${publicOrigin()}/duo`, "_blank", "noopener");
+              } else {
+                e.preventDefault();
+                window.location.assign(`${publicOrigin()}/duo`);
+              }
+            }}
+            className="card flex items-center gap-3 p-5 transition-colors hover:bg-soft/60"
+          >
+            <Columns2 className="h-6 w-6 text-accent" />
+            <span className="flex-1">
+              <span className="block text-[16px] font-semibold">โหมดสองจอ · ผู้ซื้อ ↔ ผู้ขาย</span>
+              <span className="block text-[13px] text-muted">เปิดสองบัญชีข้างกันในหน้าเดียว ลองคุยและทำดีลได้จริง</span>
+            </span>
+            <ChevronRight className="h-5 w-5 text-muted" />
+          </a>
+        </FadeUp>
+      )}
+
       <FadeUp>
         <section>
           <h2 className="mb-1 text-[17px] font-bold">สลับผู้ใช้ (โหมดทดสอบ)</h2>
-          <p className="mb-3 text-[14px] text-muted">ระบบล็อกอินจริงยังไม่เปิด — สลับบัญชีเพื่อทดสอบเป็นผู้ซื้อ ผู้ขาย หรือแอดมิน</p>
-          <ul className="card overflow-hidden">
+          {locked ? (
+            <p className="mb-3 rounded-btn bg-accent-soft px-4 py-3 text-[14px] text-accent-dark">
+              หน้าต่างนี้ล็อกเป็น <b>@{me.username}</b> จากที่อยู่เว็บ ({me.username}.localhost) — เปิดบัญชีอื่นได้ที่โหมดสองจอ
+            </p>
+          ) : (
+            <p className="mb-3 text-[14px] text-muted">ระบบล็อกอินจริงยังไม่เปิด — สลับบัญชีเพื่อทดสอบเป็นผู้ซื้อ ผู้ขาย หรือแอดมิน</p>
+          )}
+          <ul className={clsx("card overflow-hidden", locked && "pointer-events-none opacity-50")}>
             {users.map((u) => {
               const active = u.username === me.username;
               return (

@@ -148,6 +148,48 @@ describe("preconditions", () => {
     expectError(() => transition(order("DELIVERED", { inspectDeadline: past }), { type: "DISPUTE", hasEvidence: true }, BUYER, NOW), "PRECONDITION"));
 });
 
+describe("รหัสเกม (GAME_ACCOUNT)", () => {
+  const game = (s: OrderStatus, p: Partial<MachineOrder> = {}) => order(s, { kind: "GAME_ACCOUNT", ...p });
+  const DELIVER: OrderEventType = { type: "DELIVER_CREDENTIALS", hasCredentials: true };
+
+  it("จ่ายแล้วได้กำหนดส่งรหัส 24 ชม.", () => {
+    const r = transition(game("CREATED"), { type: "PAYMENT_SUCCEEDED" }, SYSTEM, NOW);
+    expect(r.patch.shipDeadline!.getTime() - NOW.getTime()).toBe(config.DIGITAL_DELIVER_HOURS * HOUR);
+  });
+
+  it("PAID_HELD → DELIVERED ทันที + เริ่มนับเวลาตรวจ", () => {
+    const r = transition(game("PAID_HELD"), DELIVER, SELLER, NOW);
+    expect(r.to).toBe("DELIVERED");
+    expect(r.ledger).toEqual([]);
+    expect(r.patch.deliveredAt).toEqual(NOW);
+    expect(r.patch.inspectDeadline!.getTime() - NOW.getTime()).toBe(config.DIGITAL_INSPECT_HOURS * HOUR);
+  });
+
+  it("เฉพาะผู้ขาย", () => {
+    expectError(() => transition(game("PAID_HELD"), DELIVER, BUYER, NOW), "FORBIDDEN");
+    expectError(() => transition(game("PAID_HELD"), DELIVER, SYSTEM, NOW), "FORBIDDEN");
+  });
+
+  it("ต้องมีข้อมูลล็อกอิน / ไม่เลยกำหนด", () => {
+    expectError(() => transition(game("PAID_HELD"), { type: "DELIVER_CREDENTIALS", hasCredentials: false }, SELLER, NOW), "PRECONDITION");
+    expectError(() => transition(game("PAID_HELD", { shipDeadline: past }), DELIVER, SELLER, NOW), "PRECONDITION");
+  });
+
+  it("สินค้าทั่วไปใช้ส่งรหัสไม่ได้ · รหัสเกมใช้ส่งพัสดุไม่ได้", () => {
+    expectError(() => transition(order("PAID_HELD"), DELIVER, SELLER, NOW), "PRECONDITION");
+    expectError(() => transition(game("PAID_HELD"), SHIP, SELLER, NOW), "PRECONDITION");
+  });
+
+  it("ส่งรหัสได้เฉพาะตอน PAID_HELD", () => {
+    for (const s of ORDER_STATUSES.filter((x) => x !== "PAID_HELD")) expectError(() => transition(game(s), DELIVER, SELLER, NOW), "INVALID_STATE");
+  });
+
+  it("ตรวจแล้วปล่อยเงิน / หมดเวลาปล่อยอัตโนมัติ เหมือนสินค้าทั่วไป", () => {
+    expect(transition(game("DELIVERED"), { type: "CONFIRM" }, BUYER, NOW).to).toBe("RELEASED");
+    expect(transition(game("DELIVERED", { inspectDeadline: past }), { type: "INSPECT_EXPIRED" }, SYSTEM, NOW).to).toBe("RELEASED");
+  });
+});
+
 describe("invalid states (ห้ามข้ามขั้น / ห้ามทำซ้ำ)", () => {
   const events: [OrderEventType, Actor, OrderStatus[]][] = [
     [{ type: "PAYMENT_SUCCEEDED" }, SYSTEM, ["CREATED"]],

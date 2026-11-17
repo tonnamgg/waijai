@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { config } from "./config";
+import { gameById } from "./games";
 
 const fileUrl = z.string().regex(/^\/api\/files\/[\w.-]+$/, "URL รูปไม่ถูกต้อง");
 
 export const createOrderSchema = z
   .object({
-    role: z.enum(["BUYER", "SELLER"]),
+    // ผู้ขายเป็นคนเปิดดีลเท่านั้น — ผู้ซื้อเข้าร่วมด้วยลิงก์
+    role: z.literal("SELLER", { errorMap: () => ({ message: "ผู้ซื้อไม่ต้องสร้างรายการ — ขอลิงก์จากผู้ขายแล้ววางที่หน้าแรก" }) }).default("SELLER"),
     title: z.string().trim().min(1, "กรุณาใส่ชื่อสินค้า").max(120, "ชื่อสินค้ายาวเกินไป"),
     price: z
       .string()
@@ -15,9 +17,14 @@ export const createOrderSchema = z
     counterparty: z.string().trim().max(50).optional().default(""),
     specText: z.string().trim().min(1, "กรุณาใส่รายละเอียดที่ต้องตรงปก").max(2000),
     photoUrls: z.array(fileUrl).max(config.MAX_LISTING_PHOTOS, `ใส่รูปได้สูงสุด ${config.MAX_LISTING_PHOTOS} รูป`).default([]),
+    kind: z.enum(["PHYSICAL", "GAME_ACCOUNT"]).default("PHYSICAL"),
+    game: z.string().trim().max(30).optional(),
+    region: z.string().trim().max(30).optional().default(""),
+    rank: z.string().trim().max(60).optional().default(""),
   })
-  .refine((v) => v.role === "BUYER" || v.photoUrls.length >= 1, {
-    message: "ผู้ขายต้องใส่รูปสินค้าจริงอย่างน้อย 1 รูป",
+  .refine((v) => v.kind !== "GAME_ACCOUNT" || !!gameById(v.game), { message: "กรุณาเลือกเกม", path: ["game"] })
+  .refine((v) => v.photoUrls.length >= 1, {
+    message: "ใส่รูปสินค้าจริง (หรือภาพหน้าจอบัญชีเกม) อย่างน้อย 1 รูป",
     path: ["photoUrls"],
   });
 
@@ -49,6 +56,18 @@ export const ratingInputSchema = z.object({
 });
 
 export const resolveInputSchema = z.object({ resolution: z.enum(["REFUND", "RELEASE"]) });
+
+export const credentialInputSchema = z.object({
+  login: z.string().trim().min(1, "กรุณาใส่ไอดี / อีเมลที่ใช้ล็อกอิน").max(120),
+  password: z.string().min(1, "กรุณาใส่รหัสผ่าน").max(200),
+  note: z.string().trim().max(500).optional().default(""),
+});
+
+export const messageInputSchema = z.object({
+  body: z.string().trim().min(1, "พิมพ์ข้อความก่อนส่ง").max(1000, "ข้อความยาวเกินไป (สูงสุด 1,000 ตัวอักษร)"),
+});
+
+export const roomPollSchema = z.object({ typing: z.boolean().optional().default(false) });
 
 export const switchUserSchema = z.object({ username: z.string().min(1).max(40) });
 
